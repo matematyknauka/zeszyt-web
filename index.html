@@ -18,10 +18,15 @@
     }
     .canvas-container {
       position: relative;
+      width: 1200px;
+      height: 800px;
+      overflow-y: auto;  /* Tylko pionowe przewijanie */
+      border: 1px solid black;
     }
     #drawingCanvas {
-      border: 1px solid black;
-      cursor: crosshair;
+      position: absolute;
+      left: 0;
+      top: 0;
     }
     .controls {
       margin-top: 20px;
@@ -42,178 +47,146 @@
 
 <div class="container">
   <div class="canvas-container">
-    <canvas id="drawingCanvas" width="800" height="600"></canvas>
+    <canvas id="drawingCanvas" width="1200" height="15000"></canvas>
   </div>
   
   <div class="controls">
-    <div>
-      <button class="button" id="undoButton">Cofnij</button>
-      <button class="button" id="saveButton">Zapisz</button>
-      <button class="button" id="loadButton">Wczytaj</button>
-      <button class="button" id="screenshotButton">Zrzut ekranu</button>
-    </div>
-    <div>
-      <button class="color-button" id="colorBlack" style="background-color: black;"></button>
-      <button class="color-button" id="colorRed" style="background-color: red;"></button>
-      <button class="color-button" id="colorBlue" style="background-color: blue;"></button>
-      <button class="color-button" id="colorGreen" style="background-color: green;"></button>
-      <button class="button" id="eraserButton">Gumka</button>
-    </div>
+    <button class="button" id="clearButton">Wyczyść</button>
+    <button class="button" id="saveButton">Zapisz</button>
+    <button class="button" id="loadButton">Wczytaj</button>
   </div>
 </div>
 
 <script>
+  // Konfiguracja rysowania
   const canvas = document.getElementById('drawingCanvas');
   const ctx = canvas.getContext('2d');
-  const undoButton = document.getElementById('undoButton');
-  const saveButton = document.getElementById('saveButton');
-  const loadButton = document.getElementById('loadButton');
-  const screenshotButton = document.getElementById('screenshotButton');
-  const colorButtons = document.querySelectorAll('.color-button');
-  const eraserButton = document.getElementById('eraserButton');
-
-  let isDrawing = false;
-  let lastX = 0, lastY = 0;
+  const canvasContainer = document.querySelector('.canvas-container');
+  let drawing = false;
   let currentColor = 'black';
-  let lines = [];
   let currentLine = [];
-  const gridSize = 10000;
-  const cellSize = 40;
-  const eraserSize = 10;
+  let lines = [];
+  let lastX, lastY;
 
-  // Rysowanie siatki
-  function drawGrid() {
-    ctx.beginPath();
-    for (let i = 0; i < gridSize; i += cellSize) {
-      // Linie pionowe
-      ctx.moveTo(i, 0);
-      ctx.lineTo(i, gridSize);
-      // Linie poziome
-      ctx.moveTo(0, i);
-      ctx.lineTo(gridSize, i);
-    }
-    ctx.strokeStyle = 'lightgray';
-    ctx.stroke();
-  }
+  // Funkcja rysująca na canvas
+  function draw(event) {
+    if (!drawing) return;
+    
+    const currentX = event.offsetX;
+    const currentY = event.offsetY;
 
-  // Rysowanie linii
-  function drawLine(x1, y1, x2, y2, color) {
+    // Rysowanie linii
     ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
-    ctx.strokeStyle = color;
+    ctx.moveTo(lastX, lastY);
+    ctx.lineTo(currentX, currentY);
+    ctx.strokeStyle = currentColor;
     ctx.lineWidth = 2;
     ctx.stroke();
+
+    // Zapisz linię
+    currentLine.push({ x1: lastX, y1: lastY, x2: currentX, y2: currentY, color: currentColor });
+    lastX = currentX;
+    lastY = currentY;
   }
 
-  // Zapisz rysunek do pliku JSON
+  function startDrawing(event) {
+    drawing = true;
+    lastX = event.offsetX;
+    lastY = event.offsetY;
+    currentLine = [];
+  }
+
+  function stopDrawing() {
+    if (drawing) {
+      lines.push(currentLine);
+      drawing = false;
+    }
+  }
+
+  // Zdarzenia myszy
+  canvas.addEventListener('mousedown', startDrawing);
+  canvas.addEventListener('mousemove', draw);
+  canvas.addEventListener('mouseup', stopDrawing);
+  canvas.addEventListener('mouseout', stopDrawing);
+
+  // Zmienianie koloru
+  function setColor(color) {
+    currentColor = color;
+  }
+
+  // Funkcja czyszcząca canvas
+  function clearCanvas() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    lines = [];
+  }
+
+  // Zapisz obraz jako JSON
   function saveDrawing() {
-    const drawingData = lines.map(line => line.map(point => ({ x: point.x, y: point.y, color: point.color })));
-    const json = JSON.stringify(drawingData);
-    const blob = new Blob([json], { type: 'application/json' });
+    const drawingData = lines.map(line => line.map(segment => ({
+      x1: segment.x1,
+      y1: segment.y1,
+      x2: segment.x2,
+      y2: segment.y2,
+      color: segment.color
+    })));
+    const jsonData = JSON.stringify(drawingData);
+    const blob = new Blob([jsonData], { type: 'application/json' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
     link.download = 'drawing.json';
     link.click();
   }
 
-  // Wczytaj rysunek z pliku JSON
-  function loadDrawing() {
+  // Wczytaj obraz z JSON
+  function loadDrawing(event) {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.json';
-    input.addEventListener('change', (event) => {
-      const file = event.target.files[0];
+    input.onchange = function () {
+      const file = input.files[0];
       const reader = new FileReader();
-      reader.onload = function (e) {
-        const data = JSON.parse(e.target.result);
-        ctx.clearRect(0, 0, canvas.width, canvas.height); // Czyścimy canvas
-        drawGrid(); // Ponownie rysujemy siatkę
-
-        // Odtwarzamy linie
-        data.forEach(line => {
-          for (let i = 0; i < line.length - 1; i++) {
-            const start = line[i];
-            const end = line[i + 1];
-            drawLine(start.x, start.y, end.x, end.y, start.color); // Rysujemy segmenty
-          }
+      reader.onload = function () {
+        const drawingData = JSON.parse(reader.result);
+        clearCanvas();
+        drawingData.forEach(line => {
+          line.forEach(segment => {
+            ctx.beginPath();
+            ctx.moveTo(segment.x1, segment.y1);
+            ctx.lineTo(segment.x2, segment.y2);
+            ctx.strokeStyle = segment.color;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+          });
         });
       };
       reader.readAsText(file);
-    });
+    };
     input.click();
   }
 
-  // Zrób zrzut ekranu
-  function takeScreenshot() {
-    const dataUrl = canvas.toDataURL('image/png');
-    const link = document.createElement('a');
-    link.href = dataUrl;
-    link.download = 'screenshot.png';
-    link.click();
-  }
+  // Obsługuje przewijanie w pionie
+  canvasContainer.addEventListener('scroll', () => {
+    console.log('Canvas przewija się');
+    // Opcjonalnie możemy tutaj dodać logikę dla dynamicznego ładowania części canvas w miarę przewijania
+  });
 
-  // Cofnij ostatnią linię
-  function undoLast() {
-    if (lines.length > 0) {
-      lines.pop();
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      drawGrid();
-      lines.forEach(line => {
-        for (let i = 0; i < line.length - 1; i++) {
-          const start = line[i];
-          const end = line[i + 1];
-          drawLine(start.x, start.y, end.x, end.y, start.color);
-        }
-      });
-    }
-  }
+  // Eventy przycisków
+  document.getElementById('clearButton').addEventListener('click', clearCanvas);
+  document.getElementById('saveButton').addEventListener('click', saveDrawing);
+  document.getElementById('loadButton').addEventListener('click', loadDrawing);
 
-  // Obsługa kliknięć przycisków kolorów
+  // Ustawienie kolorów
+  const colorButtons = ['red', 'blue', 'green', 'black'].map(color => {
+    const button = document.createElement('button');
+    button.style.backgroundColor = color;
+    button.classList.add('color-button');
+    button.addEventListener('click', () => setColor(color));
+    return button;
+  });
+
   colorButtons.forEach(button => {
-    button.addEventListener('click', (event) => {
-      currentColor = event.target.style.backgroundColor || event.target.innerText.toLowerCase();
-    });
+    document.querySelector('.controls').appendChild(button);
   });
-
-  // Obsługa przycisku gumki
-  eraserButton.addEventListener('click', () => {
-    currentColor = 'white';
-  });
-
-  // Obsługa zdarzeń myszki do rysowania
-  canvas.addEventListener('mousedown', (e) => {
-    isDrawing = true;
-    lastX = e.offsetX;
-    lastY = e.offsetY;
-    currentLine = [{ x: lastX, y: lastY, color: currentColor }];
-  });
-
-  canvas.addEventListener('mousemove', (e) => {
-    if (!isDrawing) return;
-    const currentX = e.offsetX;
-    const currentY = e.offsetY;
-    drawLine(lastX, lastY, currentX, currentY, currentColor);
-    currentLine.push({ x: currentX, y: currentY, color: currentColor });
-    lastX = currentX;
-    lastY = currentY;
-  });
-
-  canvas.addEventListener('mouseup', () => {
-    if (isDrawing) {
-      lines.push(currentLine);
-      isDrawing = false;
-    }
-  });
-
-  // Inicjalizacja siatki
-  drawGrid();
-
-  // Obsługa przycisków
-  undoButton.addEventListener('click', undoLast);
-  saveButton.addEventListener('click', saveDrawing);
-  loadButton.addEventListener('click', loadDrawing);
-  screenshotButton.addEventListener('click', takeScreenshot);
 </script>
 
 </body>
